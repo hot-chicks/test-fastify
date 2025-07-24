@@ -117,11 +117,12 @@ const demo: FastifyPluginAsync = async (fastify, opts): Promise<void> => {
       body: {
         type: 'object',
         properties: {
-          name: { type: 'string' },
-          email: { type: 'string' },
-          age: { type: 'number' }
+          name: { type: 'string', minLength: 1 },
+          email: { type: 'string', format: 'email' },
+          age: { type: 'number', minimum: 0, maximum: 150 }
         },
-        required: ['name', 'email']
+        required: ['name', 'email'],
+        additionalProperties: false
       },
       response: {
         200: {
@@ -131,11 +132,52 @@ const demo: FastifyPluginAsync = async (fastify, opts): Promise<void> => {
             message: { type: 'string' },
             user: userSchema
           }
+        },
+        400: {
+          type: 'object',
+          properties: {
+            statusCode: { type: 'number' },
+            error: { type: 'string' },
+            message: { type: 'string' }
+          }
         }
       }
+    },
+    preValidation: async (request, reply) => {
+      request.log.info({
+        method: request.method,
+        url: request.url,
+        body: request.body,
+        headers: request.headers,
+        timestamp: new Date().toISOString()
+      }, 'POST /users request received')
+    },
+    errorHandler: async (error, request, reply) => {
+      if (error.validation) {
+        request.log.warn({
+          error: error.message,
+          validationErrors: error.validation,
+          body: request.body,
+          timestamp: new Date().toISOString(),
+          context: 'Request body contained incorrect field names or missing required fields'
+        }, 'Validation error on POST /users - likely field name mismatch (e.g., "emails" instead of "email")')
+        
+        return reply.status(400).send({
+          statusCode: 400,
+          error: 'Bad Request',
+          message: `Validation failed: ${error.message}. Check field names: required fields are 'name' and 'email'.`
+        })
+      }
+      throw error
     }
   }, async function (request, reply) {
     const newUser = request.body as Partial<User>
+    
+    request.log.info({
+      userId: Math.floor(Math.random() * 1000) + 100,
+      userData: newUser,
+      timestamp: new Date().toISOString()
+    }, 'User created successfully')
     
     return {
       success: true,
