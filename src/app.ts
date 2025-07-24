@@ -41,7 +41,44 @@ const app: FastifyPluginAsync<AppOptions> = async (
       deepLinking: false
     },
     staticCSP: true,
-    transformStaticCSP: (header) => header
+    transformStaticCSP: (header: string) => header
+  })
+
+  // Global error handler for schema validation errors
+  fastify.setErrorHandler((error, request, reply) => {
+    fastify.log.error({
+      error: error.message,
+      statusCode: error.statusCode,
+      url: request.url,
+      method: request.method,
+      body: request.body,
+      timestamp: new Date().toISOString(),
+      stack: error.stack,
+      context: 'global_error_handler'
+    }, 'Request processing error')
+
+    // Handle schema validation errors specifically
+    if (error.statusCode === 400 && error.message.includes("must have required property")) {
+      const missingProperty = error.message.match(/'([^']+)'/)?.[1]
+      
+      return reply.status(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'Request validation failed',
+        details: {
+          issue: `Missing required property: ${missingProperty}`,
+          hint: missingProperty === 'name' ? 'Check if you accidentally sent "named" instead of "name"' : undefined,
+          receivedBody: request.body
+        }
+      })
+    }
+
+    // Default error response
+    reply.status(error.statusCode || 500).send({
+      statusCode: error.statusCode || 500,
+      error: error.name || 'Internal Server Error',
+      message: error.message || 'An unexpected error occurred'
+    })
   })
 
   // Do not touch the following lines
