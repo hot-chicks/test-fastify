@@ -212,11 +212,95 @@ const demo: FastifyPluginAsync = async (fastify, opts): Promise<void> => {
   }, async function (request, reply) {
     const feedback = request.body as { name: string, email: string, message: string }
     
+    // Process feedback (in real implementation, would save to database)
+    fastify.log.info({ feedback }, 'Feedback received')
+    
     return {
       success: true,
       message: 'Feedback submitted successfully',
       id: Math.floor(Math.random() * 10000) + 1000,
       submittedAt: new Date().toISOString()
+    }
+  })
+
+  // Error testing endpoint - reproduces the exception from the stack trace
+  // Analysis based on logs: This endpoint was accessed via browser from /docs swagger interface
+  // Original context: Memory usage was normal (33MB RSS), running in development mode
+  fastify.get('/error', {
+    schema: {
+      description: 'Test error endpoint for exception handling integration testing',
+      tags: ['testing'],
+      querystring: {
+        type: 'object',
+        properties: {
+          type: { 
+            type: 'string', 
+            enum: ['sync', 'async', 'validation'],
+            description: 'Type of error to simulate'
+          },
+          delay: { 
+            type: 'number', 
+            minimum: 0, 
+            maximum: 5000,
+            description: 'Delay in ms before throwing error'
+          }
+        }
+      },
+      response: {
+        500: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+            message: { type: 'string' },
+            statusCode: { type: 'number' },
+            timestamp: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async function (request, reply) {
+    const query = request.query as { type?: string; delay?: number }
+    
+    // Enhanced logging with runtime monitoring context
+    fastify.log.info({
+      endpoint: '/error',
+      method: request.method,
+      url: request.url,
+      query: query,
+      userAgent: request.headers['user-agent'],
+      referrer: request.headers.referer,
+      runtime: {
+        timestamp: new Date().toISOString(),
+        memory: process.memoryUsage(),
+        uptime: process.uptime(),
+        pid: process.pid
+      },
+      message: 'Test error endpoint accessed - simulating exception handling'
+    })
+
+    // Add optional delay for testing async error scenarios
+    if (query.delay && query.delay > 0) {
+      await new Promise(resolve => setTimeout(resolve, query.delay))
+    }
+
+    // Simulate different types of errors based on query parameter
+    switch (query.type) {
+      case 'async':
+        setTimeout(() => {
+          throw new Error('Async error test - this should be caught by process error handlers')  
+        }, 10)
+        return { message: 'Async error scheduled' }
+        
+      case 'validation':
+        const invalidData: any = { invalidField: 'test' }
+        return invalidData.nonExistentMethod()
+        
+      case 'sync':
+      default:
+        // This reproduces the original error from the stack trace
+        // Timeline context from logs: User was browsing /docs, clicked on /error endpoint
+        // System was stable with normal memory usage before the exception
+        throw new Error('This is a test error to check exception catcher integration')
     }
   })
 }
