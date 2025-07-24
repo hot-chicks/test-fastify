@@ -191,11 +191,26 @@ const demo: FastifyPluginAsync = async (fastify, opts): Promise<void> => {
       body: {
         type: 'object',
         properties: {
-          name: { type: 'string' },
-          email: { type: 'string' },
-          message: { type: 'string' }
+          name: { 
+            type: 'string',
+            minLength: 1,
+            maxLength: 100,
+            description: 'Name of the person submitting feedback'
+          },
+          email: { 
+            type: 'string',
+            format: 'email',
+            description: 'Valid email address'
+          },
+          message: { 
+            type: 'string',
+            minLength: 1,
+            maxLength: 1000,
+            description: 'Feedback message content'
+          }
         },
-        required: ['name', 'email', 'message']
+        required: ['name', 'email', 'message'],
+        additionalProperties: false
       },
       response: {
         200: {
@@ -206,11 +221,68 @@ const demo: FastifyPluginAsync = async (fastify, opts): Promise<void> => {
             id: { type: 'number' },
             submittedAt: { type: 'string' }
           }
+        },
+        400: {
+          type: 'object',
+          properties: {
+            statusCode: { type: 'number' },
+            error: { type: 'string' },
+            message: { type: 'string' },
+            details: { type: 'object' }
+          }
         }
       }
+    },
+    errorHandler: (error, request, reply) => {
+      fastify.log.error({
+        error: error.message,
+        body: request.body,
+        url: request.url,
+        method: request.method,
+        timestamp: new Date().toISOString(),
+        context: 'feedback_validation_error'
+      }, 'Feedback validation failed')
+
+      if (error.validation) {
+        const missingFields = error.validation
+          .filter((err: any) => err.keyword === 'required')
+          .map((err: any) => err.params?.missingProperty)
+          .filter(Boolean)
+
+        const invalidFields = error.validation
+          .filter((err: any) => err.keyword !== 'required')
+          .map((err: any) => ({ field: err.instancePath?.replace('/', '') || err.dataPath?.replace('.', ''), issue: err.message }))
+
+        return reply.status(400).send({
+          statusCode: 400,
+          error: 'Bad Request',
+          message: 'Request validation failed',
+          details: {
+            missingFields,
+            invalidFields,
+            hint: missingFields.includes('name') ? 'Did you mean to send "name" instead of "named"?' : undefined
+          }
+        })
+      }
+
+      return reply.status(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: error.message || 'Invalid request format'
+      })
     }
   }, async function (request, reply) {
     const feedback = request.body as { name: string, email: string, message: string }
+    
+    fastify.log.info({
+      feedback: {
+        name: feedback.name,
+        email: feedback.email,
+        messageLength: feedback.message.length
+      },
+      timestamp: new Date().toISOString(),
+      context: 'feedback_submitted'
+    }, 'Feedback submitted successfully')
     
     return {
       success: true,
